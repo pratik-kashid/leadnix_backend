@@ -1,0 +1,7 @@
+export enum ChannelType {
+  MANUAL = 'MANUAL',
+  INSTAGRAM = 'INSTAGRAM',
+  WHATSAPP = 'WHATSAPP',
+  FACEBOOK = 'FACEBOOK',
+  WEBSITE = 'WEBSITE',
+}
