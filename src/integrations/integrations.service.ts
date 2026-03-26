@@ -131,7 +131,7 @@ export class IntegrationsService {
       phoneNumberId: string;
       wabaId: string;
       displayLabel: string;
-      accessToken?: string;
+      accessToken: string;
     },
     businessId?: string,
     manager?: EntityManager,
@@ -160,7 +160,7 @@ export class IntegrationsService {
         wabaId: dto.wabaId,
         phoneNumberId: dto.phoneNumberId,
         displayLabel: dto.displayLabel,
-        accessTokenEncrypted: dto.accessToken ?? null,
+        accessTokenEncrypted: dto.accessToken.trim(),
         webhookSubscribed: false,
         configJson: {
           mock: true,
@@ -176,7 +176,7 @@ export class IntegrationsService {
       integration.wabaId = dto.wabaId;
       integration.phoneNumberId = dto.phoneNumberId;
       integration.displayLabel = dto.displayLabel;
-      integration.accessTokenEncrypted = dto.accessToken ?? integration.accessTokenEncrypted;
+      integration.accessTokenEncrypted = dto.accessToken.trim() || integration.accessTokenEncrypted;
       integration.configJson = {
         ...(integration.configJson ?? {}),
         mock: true,

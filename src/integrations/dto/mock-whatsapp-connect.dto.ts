@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class MockWhatsappConnectDto {
   @ApiProperty()
@@ -17,8 +17,8 @@ export class MockWhatsappConnectDto {
   @IsNotEmpty()
   displayLabel: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty({ description: 'Temporary development token used for WhatsApp Cloud API testing.' })
   @IsString()
-  accessToken?: string;
+  @IsNotEmpty()
+  accessToken: string;
 }
