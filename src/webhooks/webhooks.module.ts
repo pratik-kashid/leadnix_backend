@@ -1,9 +1,20 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { QueuesModule } from '../queues/queues.module';
+import { Contact } from '../contacts/entities/contact.entity';
+import { Lead } from '../leads/entities/lead.entity';
+import { Conversation } from '../conversations/entities/conversation.entity';
+import { Message } from '../messages/entities/message.entity';
+import { Integration } from '../integrations/entities/integration.entity';
 import { WebhooksController } from './webhooks.controller';
-import { WebhooksService } from './webhooks.service';
+import { WhatsappWebhookService } from './whatsapp-webhook.service';
 
 @Module({
+  imports: [
+    TypeOrmModule.forFeature([Integration, Contact, Lead, Conversation, Message]),
+    QueuesModule,
+  ],
   controllers: [WebhooksController],
-  providers: [WebhooksService]
+  providers: [WhatsappWebhookService],
 })
 export class WebhooksModule {}

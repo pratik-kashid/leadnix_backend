@@ -18,17 +18,32 @@ export class Integration {
   @Column({ type: 'boolean', default: false })
   isConnected: boolean;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', default: true })
   isEnabled: boolean;
 
   @Column({ type: 'boolean', default: false })
   autoReplyEnabled: boolean;
 
-  @Column({ type: 'enum', enum: IntegrationStatus, default: IntegrationStatus.DISCONNECTED })
-  status: IntegrationStatus;
+  @Column({ type: 'enum', enum: IntegrationStatus, nullable: true })
+  status: IntegrationStatus | null;
 
-  @Column({ type: 'jsonb' })
-  configJson: Record<string, unknown>;
+  @Column({ type: 'varchar', nullable: true })
+  externalAccountId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  wabaId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  phoneNumberId: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  accessTokenEncrypted: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  webhookSubscribed: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  configJson: Record<string, unknown> | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

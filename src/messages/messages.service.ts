@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { TeamMembersService } from '../team-members/team-members.service';
@@ -13,9 +13,13 @@ import { SenderType } from '../common/enums/sender-type.enum';
 import { MessageDirection } from '../common/enums/message-direction.enum';
 import { MessageType } from '../common/enums/message-type.enum';
 import { ChannelType } from '../common/enums/channel-type.enum';
+import { IntegrationsService } from '../integrations/integrations.service';
+import { IntegrationProvider } from '../common/enums/integration-provider.enum';
 
 @Injectable()
 export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+
   constructor(
     @InjectRepository(Message)
     private readonly messagesRepository: Repository<Message>,
@@ -24,6 +28,7 @@ export class MessagesService {
     @InjectRepository(Lead)
     private readonly leadsRepository: Repository<Lead>,
     private readonly teamMembersService: TeamMembersService,
+    private readonly integrationsService: IntegrationsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -46,18 +51,23 @@ export class MessagesService {
       const messageRepository = manager.getRepository(Message);
 
       let conversation: Conversation | null = null;
+      let lead: Lead | null = null;
 
       if (dto.conversationId) {
         conversation = await conversationRepository.findOne({
           where: { id: dto.conversationId, businessId: In(businessIds) },
+          relations: { lead: { contact: true } },
         });
 
         if (!conversation) {
           throw new NotFoundException('Conversation not found');
         }
+
+        lead = conversation.lead;
       } else {
-        const lead = await leadRepository.findOne({
+        lead = await leadRepository.findOne({
           where: { id: dto.leadId!, businessId: In(businessIds) },
+          relations: { contact: true },
         });
 
         if (!lead) {
@@ -77,21 +87,67 @@ export class MessagesService {
             conversationRepository.create({
               businessId: lead.businessId,
               leadId: lead.id,
-              channelType: ChannelType.MANUAL,
+              channelType: lead.source === 'WHATSAPP' ? ChannelType.WHATSAPP : ChannelType.MANUAL,
               externalThreadId: null,
             }),
           );
         }
       }
 
+      if (!lead) {
+        lead = await leadRepository.findOne({
+          where: { id: conversation.leadId, businessId: conversation.businessId },
+          relations: { contact: true },
+        });
+
+        if (!lead) {
+          throw new NotFoundException('Lead not found');
+        }
+      }
+
+      const isWhatsAppContext =
+        conversation.channelType === ChannelType.WHATSAPP || lead.source === 'WHATSAPP';
+
+      let externalMessageId = dto.externalMessageId ?? null;
+
+      if (isWhatsAppContext) {
+        const activeWhatsAppIntegration = await this.integrationsService.findActiveIntegrationForBusiness(
+          conversation.businessId,
+          IntegrationProvider.WHATSAPP,
+          manager,
+        );
+
+        if (!activeWhatsAppIntegration) {
+          throw new BadRequestException('WhatsApp integration is not connected or enabled for this business');
+        }
+
+        const toPhone = lead.contact?.phone;
+        if (!toPhone) {
+          throw new BadRequestException('Lead contact does not have a phone number for WhatsApp delivery');
+        }
+
+        const sendResult = await this.integrationsService.sendWhatsAppTextMessage(
+          activeWhatsAppIntegration,
+          toPhone,
+          dto.content,
+        );
+
+        externalMessageId = sendResult.externalMessageId ?? null;
+        this.logger.debug(
+          `WhatsApp message sent for business ${conversation.businessId}, lead ${lead.id}, response: ${JSON.stringify(
+            sendResult.rawResponse,
+          )}`,
+        );
+      }
+
       const message = messageRepository.create({
         businessId: conversation.businessId,
         conversationId: conversation.id,
-        senderType: dto.senderType ?? SenderType.AGENT,
-        direction: dto.direction ?? MessageDirection.OUTBOUND,
+        senderType: isWhatsAppContext ? SenderType.AGENT : dto.senderType ?? SenderType.AGENT,
+        direction: isWhatsAppContext ? MessageDirection.OUTBOUND : dto.direction ?? MessageDirection.OUTBOUND,
         content: dto.content,
-        messageType: dto.messageType ?? MessageType.TEXT,
-        externalMessageId: dto.externalMessageId ?? null,
+        messageType: isWhatsAppContext ? MessageType.TEXT : dto.messageType ?? MessageType.TEXT,
+        externalMessageId,
         sentAt: new Date(),
       });
 

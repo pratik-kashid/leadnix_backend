@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, ParseEnumPipe, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, ParseEnumPipe, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -16,12 +16,55 @@ import { IntegrationsService } from './integrations.service';
 export class IntegrationsController {
   constructor(private readonly integrationsService: IntegrationsService) {}
 
+  @Get()
+  @ApiOkResponse({ type: IntegrationResponseDto, isArray: true })
+  list(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<IntegrationResponseDto[]> {
+    return this.listCurrentBusiness(user);
+  }
+
   @Get('me')
   @ApiOkResponse({ type: IntegrationResponseDto, isArray: true })
-  listMe(@CurrentUser() user: JwtPayload): Promise<IntegrationResponseDto[]> {
+  listMe(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<IntegrationResponseDto[]> {
+    return this.listCurrentBusiness(user);
+  }
+
+  @Patch(':id/enabled')
+  @ApiOkResponse({ type: IntegrationResponseDto })
+  updateEnabledById(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateIntegrationEnabledDto,
+  ): Promise<IntegrationResponseDto> {
     return this.integrationsService
-      .listForCurrentBusiness(user.sub, user.businessId ?? undefined)
-      .then((integrations) => integrations.map((integration) => this.toResponse(integration)));
+      .setEnabledById(user.sub, id, dto.enabled, user.businessId ?? undefined)
+      .then((integration) => this.toResponse(integration));
+  }
+
+  @Patch(':id/auto-reply')
+  @ApiOkResponse({ type: IntegrationResponseDto })
+  updateAutoReplyById(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateIntegrationAutoReplyDto,
+  ): Promise<IntegrationResponseDto> {
+    return this.integrationsService
+      .setAutoReplyEnabledById(user.sub, id, dto.autoReplyEnabled, user.businessId ?? undefined)
+      .then((integration) => this.toResponse(integration));
+  }
+
+  @Post(':id/disconnect')
+  @ApiOkResponse({ type: IntegrationResponseDto })
+  disconnectById(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<IntegrationResponseDto> {
+    return this.integrationsService
+      .disconnectById(user.sub, id, user.businessId ?? undefined)
+      .then((integration) => this.toResponse(integration));
   }
 
   @Patch(':provider/enabled')
@@ -55,8 +98,13 @@ export class IntegrationsController {
     isConnected: boolean;
     isEnabled: boolean;
     autoReplyEnabled: boolean;
-    status: string;
-    configJson: Record<string, unknown>;
+    status: string | null;
+    externalAccountId: string | null;
+    wabaId: string | null;
+    phoneNumberId: string | null;
+    accessTokenEncrypted: string | null;
+    webhookSubscribed: boolean;
+    configJson: Record<string, unknown> | null;
     createdAt: Date;
     updatedAt: Date;
   }): IntegrationResponseDto {
@@ -67,10 +115,21 @@ export class IntegrationsController {
       isConnected: integration.isConnected,
       isEnabled: integration.isEnabled,
       autoReplyEnabled: integration.autoReplyEnabled,
-      status: integration.status as IntegrationResponseDto['status'],
-      configJson: integration.configJson ?? {},
+      status: integration.status as IntegrationResponseDto['status'] | null,
+      externalAccountId: integration.externalAccountId,
+      wabaId: integration.wabaId,
+      phoneNumberId: integration.phoneNumberId,
+      accessTokenEncrypted: integration.accessTokenEncrypted,
+      webhookSubscribed: integration.webhookSubscribed,
+      configJson: integration.configJson ?? null,
       createdAt: integration.createdAt,
       updatedAt: integration.updatedAt,
     };
+  }
+
+  private listCurrentBusiness(user: JwtPayload): Promise<IntegrationResponseDto[]> {
+    return this.integrationsService
+      .listForCurrentBusiness(user.sub, user.businessId ?? undefined)
+      .then((integrations) => integrations.map((integration) => this.toResponse(integration)));
   }
 }

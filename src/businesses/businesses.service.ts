@@ -68,6 +68,11 @@ export class BusinessesService {
     return business;
   }
 
+  async getAccessibleBusinessIds(userId: string, manager?: EntityManager): Promise<string[]> {
+    const memberships = await this.teamMembersService.findByUserId(userId, manager);
+    return memberships.map((membership) => membership.businessId);
+  }
+
   async updateMyBusiness(
     userId: string,
     dto: UpdateBusinessDto,
