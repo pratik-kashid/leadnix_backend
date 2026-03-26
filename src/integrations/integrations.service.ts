@@ -131,7 +131,64 @@ export class IntegrationsService {
       phoneNumberId: string;
       wabaId: string;
       displayLabel: string;
-      accessToken: string;
+      accessToken?: string;
+    },
+    businessId?: string,
+    manager?: EntityManager,
+  ): Promise<Integration> {
+    return this.upsertWhatsAppConnection(
+      userId,
+      {
+        phoneNumberId: dto.phoneNumberId,
+        wabaId: dto.wabaId,
+        displayLabel: dto.displayLabel,
+        accessToken: dto.accessToken,
+        configJson: { connectionSource: 'manual' },
+      },
+      businessId,
+      manager,
+    );
+  }
+
+  async completeWhatsAppConnection(
+    userId: string,
+    dto: {
+      phoneNumberId: string;
+      wabaId: string;
+      displayLabel: string;
+      accessToken?: string;
+      businessAccountName?: string;
+      configJson?: Record<string, unknown>;
+    },
+    businessId?: string,
+    manager?: EntityManager,
+  ): Promise<Integration> {
+    return this.upsertWhatsAppConnection(
+      userId,
+      {
+        phoneNumberId: dto.phoneNumberId,
+        wabaId: dto.wabaId,
+        displayLabel: dto.displayLabel,
+        accessToken: dto.accessToken,
+        configJson: {
+          connectionSource: 'embedded_signup',
+          businessAccountName: dto.businessAccountName ?? null,
+          ...(dto.configJson ?? {}),
+        },
+      },
+      businessId,
+      manager,
+    );
+  }
+
+  private async upsertWhatsAppConnection(
+    userId: string,
+    dto: {
+      phoneNumberId: string;
+      wabaId: string;
+      displayLabel: string;
+      accessToken?: string;
+      configJson?: Record<string, unknown>;
     },
     businessId?: string,
     manager?: EntityManager,
@@ -160,13 +217,13 @@ export class IntegrationsService {
         wabaId: dto.wabaId,
         phoneNumberId: dto.phoneNumberId,
         displayLabel: dto.displayLabel,
-        accessTokenEncrypted: dto.accessToken.trim(),
+        accessTokenEncrypted: dto.accessToken?.trim() ?? null,
         webhookSubscribed: false,
         configJson: {
-          mock: true,
           displayLabel: dto.displayLabel,
           phoneNumberId: dto.phoneNumberId,
           wabaId: dto.wabaId,
+          ...(dto.configJson ?? {}),
         },
       });
     } else {
@@ -176,13 +233,13 @@ export class IntegrationsService {
       integration.wabaId = dto.wabaId;
       integration.phoneNumberId = dto.phoneNumberId;
       integration.displayLabel = dto.displayLabel;
-      integration.accessTokenEncrypted = dto.accessToken.trim() || integration.accessTokenEncrypted;
+      integration.accessTokenEncrypted = dto.accessToken?.trim() || integration.accessTokenEncrypted;
       integration.configJson = {
         ...(integration.configJson ?? {}),
-        mock: true,
         displayLabel: dto.displayLabel,
         phoneNumberId: dto.phoneNumberId,
         wabaId: dto.wabaId,
+        ...(dto.configJson ?? {}),
       };
       integration.autoReplyEnabled = integration.autoReplyEnabled ?? false;
     }

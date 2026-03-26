@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { IntegrationProvider } from '../common/enums/integration-provider.enum';
-import { MockWhatsappConnectDto, WhatsappConnectDto } from './dto/mock-whatsapp-connect.dto';
+import { CompleteWhatsappConnectDto, MockWhatsappConnectDto, WhatsappConnectDto } from './dto/mock-whatsapp-connect.dto';
 import { UpdateIntegrationAutoReplyDto } from './dto/update-integration-auto-reply.dto';
 import { UpdateIntegrationEnabledDto } from './dto/update-integration-enabled.dto';
 import { IntegrationResponseDto } from './dto/integration-response.dto';
@@ -29,6 +29,21 @@ export class IntegrationsController {
   ): Promise<IntegrationResponseDto> {
     return this.integrationsService
       .connectWhatsApp(user.sub, dto, user.businessId ?? undefined)
+      .then((integration) => this.toResponse(integration));
+  }
+
+  @Post('whatsapp/connect/complete')
+  @ApiOperation({
+    summary: 'Complete Meta Embedded Signup for WhatsApp',
+    description: 'Attaches the WhatsApp onboarding result to the current business and stores the onboarding metadata.',
+  })
+  @ApiOkResponse({ type: IntegrationResponseDto })
+  completeWhatsappConnection(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CompleteWhatsappConnectDto,
+  ): Promise<IntegrationResponseDto> {
+    return this.integrationsService
+      .completeWhatsAppConnection(user.sub, dto, user.businessId ?? undefined)
       .then((integration) => this.toResponse(integration));
   }
 
