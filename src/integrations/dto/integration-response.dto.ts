@@ -25,26 +25,11 @@ export class IntegrationResponseDto {
   status: IntegrationStatus | null;
 
   @ApiPropertyOptional({ nullable: true })
-  externalAccountId: string | null;
+  phoneNumberId: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   wabaId: string | null;
 
   @ApiPropertyOptional({ nullable: true })
-  phoneNumberId: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  accessTokenEncrypted: string | null;
-
-  @ApiProperty()
-  webhookSubscribed: boolean;
-
-  @ApiPropertyOptional({ type: 'object', additionalProperties: true, nullable: true })
-  configJson: Record<string, unknown> | null;
-
-  @ApiProperty()
-  createdAt: Date;
-
-  @ApiProperty()
-  updatedAt: Date;
+  displayLabel: string | null;
 }

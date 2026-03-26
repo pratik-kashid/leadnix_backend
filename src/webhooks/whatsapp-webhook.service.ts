@@ -124,6 +124,9 @@ export class WhatsappWebhookService {
       const integration = await this.findMatchingIntegration(manager, event);
 
       if (!integration) {
+        this.logger.warn(
+          `Skipping unmatched WhatsApp inbound event for phoneNumberId=${event.phoneNumberId ?? 'unknown'} wabaId=${event.wabaId ?? 'unknown'}`,
+        );
         return { businessId: '', leadId: '', processed: false };
       }
 
@@ -176,7 +179,7 @@ export class WhatsappWebhookService {
     event: InboundTextMessageEvent,
   ): Promise<Integration | null> {
     const integrations = await manager.getRepository(Integration).find({
-      where: { provider: IntegrationProvider.WHATSAPP },
+      where: { provider: IntegrationProvider.WHATSAPP, isConnected: true, isEnabled: true },
       order: { createdAt: 'ASC' },
     });
 
@@ -199,7 +202,7 @@ export class WhatsappWebhookService {
     });
 
     if (!matchingIntegration) {
-      this.logger.debug(
+      this.logger.warn(
         `No matching WhatsApp integration found for phoneNumberId=${normalizedPhoneNumberId ?? 'unknown'} wabaId=${normalizedWabaId ?? 'unknown'}`,
       );
       return null;

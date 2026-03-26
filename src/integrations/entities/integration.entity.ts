@@ -36,6 +36,9 @@ export class Integration {
   @Column({ type: 'varchar', nullable: true })
   phoneNumberId: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  displayLabel: string | null;
+
   @Column({ type: 'text', nullable: true })
   accessTokenEncrypted: string | null;
 

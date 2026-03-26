@@ -125,6 +125,71 @@ export class IntegrationsService {
     return this.getRepository(manager).save(integration);
   }
 
+  async connectMockWhatsApp(
+    userId: string,
+    dto: {
+      phoneNumberId: string;
+      wabaId: string;
+      displayLabel: string;
+      accessToken?: string;
+    },
+    businessId?: string,
+    manager?: EntityManager,
+  ): Promise<Integration> {
+    const business = await this.businessesService.getMyBusiness(userId, businessId, manager);
+    const repository = this.getRepository(manager);
+
+    await this.ensureDefaultIntegrations(business.id, manager);
+
+    let integration = await repository.findOne({
+      where: {
+        businessId: business.id,
+        provider: IntegrationProvider.WHATSAPP,
+      },
+    });
+
+    if (!integration) {
+      integration = repository.create({
+        businessId: business.id,
+        provider: IntegrationProvider.WHATSAPP,
+        isConnected: true,
+        isEnabled: true,
+        autoReplyEnabled: false,
+        status: IntegrationStatus.CONNECTED,
+        externalAccountId: null,
+        wabaId: dto.wabaId,
+        phoneNumberId: dto.phoneNumberId,
+        displayLabel: dto.displayLabel,
+        accessTokenEncrypted: dto.accessToken ?? null,
+        webhookSubscribed: false,
+        configJson: {
+          mock: true,
+          displayLabel: dto.displayLabel,
+          phoneNumberId: dto.phoneNumberId,
+          wabaId: dto.wabaId,
+        },
+      });
+    } else {
+      integration.isConnected = true;
+      integration.isEnabled = true;
+      integration.status = IntegrationStatus.CONNECTED;
+      integration.wabaId = dto.wabaId;
+      integration.phoneNumberId = dto.phoneNumberId;
+      integration.displayLabel = dto.displayLabel;
+      integration.accessTokenEncrypted = dto.accessToken ?? integration.accessTokenEncrypted;
+      integration.configJson = {
+        ...(integration.configJson ?? {}),
+        mock: true,
+        displayLabel: dto.displayLabel,
+        phoneNumberId: dto.phoneNumberId,
+        wabaId: dto.wabaId,
+      };
+      integration.autoReplyEnabled = integration.autoReplyEnabled ?? false;
+    }
+
+    return repository.save(integration);
+  }
+
   async disconnectById(
     userId: string,
     integrationId: string,
@@ -252,8 +317,10 @@ export class IntegrationsService {
     integration.externalAccountId = null;
     integration.wabaId = null;
     integration.phoneNumberId = null;
+    integration.displayLabel = null;
     integration.accessTokenEncrypted = null;
     integration.webhookSubscribed = false;
+    integration.configJson = null;
 
     return this.getRepository(manager).save(integration);
   }
@@ -332,6 +399,7 @@ export class IntegrationsService {
         externalAccountId: null,
         wabaId: null,
         phoneNumberId: null,
+        displayLabel: null,
         accessTokenEncrypted: null,
         webhookSubscribed: false,
         configJson: null,
