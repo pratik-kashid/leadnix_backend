@@ -12,5 +12,6 @@ import { IntegrationsModule } from '../integrations/integrations.module';
   imports: [TypeOrmModule.forFeature([Message, Conversation, Lead]), TeamMembersModule, IntegrationsModule],
   controllers: [MessagesController],
   providers: [MessagesService],
+  exports: [MessagesService],
 })
 export class MessagesModule {}

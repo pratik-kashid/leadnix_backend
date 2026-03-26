@@ -118,6 +118,7 @@ export class IntegrationsController {
     phoneNumberId: string | null;
     wabaId: string | null;
     displayLabel: string | null;
+    accessTokenEncrypted: string | null;
     configJson: Record<string, unknown> | null;
   }): IntegrationResponseDto {
     return {
@@ -131,6 +132,7 @@ export class IntegrationsController {
       phoneNumberId: integration.phoneNumberId,
       wabaId: integration.wabaId,
       displayLabel: integration.displayLabel ?? (integration.isConnected ? this.resolveDisplayLabel(integration) : null),
+      hasAccessToken: Boolean(integration.accessTokenEncrypted?.trim()),
     };
   }
 

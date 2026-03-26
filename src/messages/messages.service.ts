@@ -1,6 +1,12 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { TeamMembersService } from '../team-members/team-members.service';
 import { Message } from './entities/message.entity';
 import { Conversation } from '../conversations/entities/conversation.entity';
@@ -44,11 +50,81 @@ export class MessagesService {
   }
 
   async send(userId: string, dto: SendMessageDto): Promise<MessageResponseDto> {
-    const savedMessage = await this.dataSource.transaction(async (manager) => {
-      const businessIds = await this.getAccessibleBusinessIds(userId);
-      const conversationRepository = manager.getRepository(Conversation);
-      const leadRepository = manager.getRepository(Lead);
-      const messageRepository = manager.getRepository(Message);
+    const businessIds = await this.getAccessibleBusinessIds(userId);
+    const savedMessage = await this.sendWithinBusinessScope(businessIds, dto);
+
+    return this.toResponse(savedMessage);
+  }
+
+  async sendForBusiness(
+    businessId: string,
+    dto: SendMessageDto,
+    manager?: EntityManager,
+  ): Promise<MessageResponseDto> {
+    const savedMessage = await this.sendWithinBusinessScope([businessId], dto, manager);
+    return this.toResponse(savedMessage);
+  }
+
+  async findByConversation(userId: string, query: QueryMessagesDto): Promise<PaginatedMessagesResponseDto> {
+    const businessIds = await this.getAccessibleBusinessIds(userId);
+    const conversation = await this.conversationsRepository.findOne({
+      where: { id: query.conversationId, businessId: In(businessIds) },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+
+    const qb = this.messagesRepository
+      .createQueryBuilder('message')
+      .where('message.conversationId = :conversationId', { conversationId: conversation.id })
+      .andWhere('message.businessId = :businessId', { businessId: conversation.businessId })
+      .orderBy('message.createdAt', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [items, total] = await qb.getManyAndCount();
+
+    return {
+      items: items.map((item) => this.toResponse(item)),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  private toResponse(message: Message): MessageResponseDto {
+    return {
+      id: message.id,
+      businessId: message.businessId,
+      conversationId: message.conversationId,
+      senderType: message.senderType,
+      direction: message.direction,
+      content: message.content,
+      messageType: message.messageType,
+      externalMessageId: message.externalMessageId,
+      sentAt: message.sentAt,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+    };
+  }
+
+  private async sendWithinBusinessScope(
+    businessIds: string[],
+    dto: SendMessageDto,
+    manager?: EntityManager,
+  ): Promise<Message> {
+    if (!businessIds.length) {
+      throw new ForbiddenException('No accessible businesses found');
+    }
+
+    const run = async (entityManager: EntityManager): Promise<Message> => {
+      const conversationRepository = entityManager.getRepository(Conversation);
+      const leadRepository = entityManager.getRepository(Lead);
+      const messageRepository = entityManager.getRepository(Message);
 
       let conversation: Conversation | null = null;
       let lead: Lead | null = null;
@@ -114,7 +190,7 @@ export class MessagesService {
         const activeWhatsAppIntegration = await this.integrationsService.findActiveIntegrationForBusiness(
           conversation.businessId,
           IntegrationProvider.WHATSAPP,
-          manager,
+          entityManager,
         );
 
         if (!activeWhatsAppIntegration) {
@@ -152,55 +228,8 @@ export class MessagesService {
       });
 
       return messageRepository.save(message);
-    });
-
-    return this.toResponse(savedMessage);
-  }
-
-  async findByConversation(userId: string, query: QueryMessagesDto): Promise<PaginatedMessagesResponseDto> {
-    const businessIds = await this.getAccessibleBusinessIds(userId);
-    const conversation = await this.conversationsRepository.findOne({
-      where: { id: query.conversationId, businessId: In(businessIds) },
-    });
-
-    if (!conversation) {
-      throw new NotFoundException('Conversation not found');
-    }
-
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 25;
-
-    const qb = this.messagesRepository
-      .createQueryBuilder('message')
-      .where('message.conversationId = :conversationId', { conversationId: conversation.id })
-      .andWhere('message.businessId = :businessId', { businessId: conversation.businessId })
-      .orderBy('message.createdAt', 'ASC')
-      .skip((page - 1) * limit)
-      .take(limit);
-
-    const [items, total] = await qb.getManyAndCount();
-
-    return {
-      items: items.map((item) => this.toResponse(item)),
-      total,
-      page,
-      limit,
     };
-  }
 
-  private toResponse(message: Message): MessageResponseDto {
-    return {
-      id: message.id,
-      businessId: message.businessId,
-      conversationId: message.conversationId,
-      senderType: message.senderType,
-      direction: message.direction,
-      content: message.content,
-      messageType: message.messageType,
-      externalMessageId: message.externalMessageId,
-      sentAt: message.sentAt,
-      createdAt: message.createdAt,
-      updatedAt: message.updatedAt,
-    };
+    return manager ? run(manager) : this.dataSource.transaction(run);
   }
 }

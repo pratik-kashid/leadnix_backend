@@ -32,4 +32,7 @@ export class IntegrationResponseDto {
 
   @ApiPropertyOptional({ nullable: true })
   displayLabel: string | null;
+
+  @ApiProperty()
+  hasAccessToken: boolean;
 }

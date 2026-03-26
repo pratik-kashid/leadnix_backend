@@ -2,12 +2,14 @@ import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { AiService } from '../ai/ai.service';
 import { Business } from '../businesses/entities/business.entity';
 import { Contact } from '../contacts/entities/contact.entity';
 import { Integration } from '../integrations/entities/integration.entity';
 import { Lead } from '../leads/entities/lead.entity';
 import { Conversation } from '../conversations/entities/conversation.entity';
 import { Message } from '../messages/entities/message.entity';
+import { MessagesService } from '../messages/messages.service';
 import { AiQueue } from '../queues/ai.queue';
 import { IntegrationProvider } from '../common/enums/integration-provider.enum';
 import { ChannelType } from '../common/enums/channel-type.enum';
@@ -16,6 +18,7 @@ import { LeadStatus } from '../common/enums/lead-status.enum';
 import { MessageDirection } from '../common/enums/message-direction.enum';
 import { MessageType } from '../common/enums/message-type.enum';
 import { SenderType } from '../common/enums/sender-type.enum';
+import { SendMessageDto } from '../messages/dto/send-message.dto';
 
 type WhatsAppWebhookPayload = {
   object?: string;
@@ -64,7 +67,9 @@ type InboundTextMessageEvent = {
 type ProcessedInboundMessage = {
   businessId: string;
   leadId: string;
+  conversationId: string;
   processed: boolean;
+  autoReplyEnabled: boolean;
 };
 
 @Injectable()
@@ -75,6 +80,8 @@ export class WhatsappWebhookService {
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
     private readonly aiQueue: AiQueue,
+    private readonly aiService: AiService,
+    private readonly messagesService: MessagesService,
     @InjectRepository(Integration)
     private readonly integrationsRepository: Repository<Integration>,
     @InjectRepository(Contact)
@@ -113,6 +120,14 @@ export class WhatsappWebhookService {
             `Could not enqueue AI jobs for WhatsApp lead ${result.leadId}: ${error instanceof Error ? error.message : String(error)}`,
           );
         });
+
+        if (result.autoReplyEnabled) {
+          void this.maybeSendAutoReply(result.businessId, result.leadId, result.conversationId).catch((error) => {
+            this.logger.warn(
+              `Could not send WhatsApp auto-reply for lead ${result.leadId}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        }
       }
     }
 
@@ -127,7 +142,7 @@ export class WhatsappWebhookService {
         this.logger.warn(
           `Skipping unmatched WhatsApp inbound event for phoneNumberId=${event.phoneNumberId ?? 'unknown'} wabaId=${event.wabaId ?? 'unknown'}`,
         );
-        return { businessId: '', leadId: '', processed: false };
+        return { businessId: '', leadId: '', conversationId: '', processed: false, autoReplyEnabled: false };
       }
 
       const messageRepository = manager.getRepository(Message);
@@ -141,7 +156,13 @@ export class WhatsappWebhookService {
 
         if (existingMessage) {
           this.logger.debug(`Ignoring duplicate WhatsApp message ${event.externalMessageId}`);
-          return { businessId: integration.businessId, leadId: '', processed: false };
+          return {
+            businessId: integration.businessId,
+            leadId: '',
+            conversationId: '',
+            processed: false,
+            autoReplyEnabled: false,
+          };
         }
       }
 
@@ -169,7 +190,9 @@ export class WhatsappWebhookService {
       return {
         businessId: integration.businessId,
         leadId: lead.id,
+        conversationId: conversation.id,
         processed: true,
+        autoReplyEnabled: integration.autoReplyEnabled,
       };
     });
   }
@@ -184,31 +207,58 @@ export class WhatsappWebhookService {
     });
 
     const normalizedPhoneNumberId = event.phoneNumberId?.trim();
-    const normalizedWabaId = event.wabaId?.trim();
 
     const matchingIntegration = integrations.find((integration) => {
       const configJson = integration.configJson ?? {};
       const configPhoneNumberId = this.getStringValue(configJson.phoneNumberId);
-      const configWabaId = this.getStringValue(configJson.wabaId);
       const configMetadataPhoneNumberId = this.getStringValue(this.asRecord(configJson.metadata)?.phoneNumberId);
 
       return (
-        (normalizedPhoneNumberId && integration.phoneNumberId === normalizedPhoneNumberId) ||
-        (normalizedPhoneNumberId && configPhoneNumberId === normalizedPhoneNumberId) ||
-        (normalizedPhoneNumberId && configMetadataPhoneNumberId === normalizedPhoneNumberId) ||
-        (normalizedWabaId && integration.wabaId === normalizedWabaId) ||
-        (normalizedWabaId && configWabaId === normalizedWabaId)
+        Boolean(normalizedPhoneNumberId) &&
+        ((integration.phoneNumberId && integration.phoneNumberId === normalizedPhoneNumberId) ||
+          (configPhoneNumberId && configPhoneNumberId === normalizedPhoneNumberId) ||
+          (configMetadataPhoneNumberId && configMetadataPhoneNumberId === normalizedPhoneNumberId))
       );
     });
 
     if (!matchingIntegration) {
       this.logger.warn(
-        `No matching WhatsApp integration found for phoneNumberId=${normalizedPhoneNumberId ?? 'unknown'} wabaId=${normalizedWabaId ?? 'unknown'}`,
+        `No matching WhatsApp integration found for phoneNumberId=${normalizedPhoneNumberId ?? 'unknown'} wabaId=${event.wabaId ?? 'unknown'}`,
       );
       return null;
     }
 
     return matchingIntegration;
+  }
+
+  private async maybeSendAutoReply(businessId: string, leadId: string, conversationId: string): Promise<void> {
+    const activeIntegration = await this.integrationsRepository.findOne({
+      where: {
+        businessId,
+        provider: IntegrationProvider.WHATSAPP,
+        isConnected: true,
+        isEnabled: true,
+        autoReplyEnabled: true,
+      },
+    });
+
+    if (!activeIntegration) {
+      this.logger.debug(`Skipping WhatsApp auto-reply for lead ${leadId} because auto-reply is disabled or integration is inactive`);
+      return;
+    }
+
+    const suggestion = await this.aiService.suggestReplyForBusiness(businessId, leadId, {});
+    const replyText = suggestion.suggestedReply?.trim();
+
+    if (!replyText) {
+      this.logger.warn(`AI returned an empty WhatsApp auto-reply for lead ${leadId}`);
+      return;
+    }
+
+    await this.messagesService.sendForBusiness(businessId, {
+      conversationId,
+      content: replyText,
+    } as SendMessageDto);
   }
 
   private async findOrCreateContact(
