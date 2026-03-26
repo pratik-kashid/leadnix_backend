@@ -1,8 +1,8 @@
 import { Body, Controller, Get, Param, Patch, ParseEnumPipe, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { IntegrationProvider } from '../common/enums/integration-provider.enum';
 import { CompleteWhatsappConnectDto, MockWhatsappConnectDto, WhatsappConnectDto } from './dto/mock-whatsapp-connect.dto';
 import { UpdateIntegrationAutoReplyDto } from './dto/update-integration-auto-reply.dto';
@@ -64,17 +64,13 @@ export class IntegrationsController {
 
   @Get()
   @ApiOkResponse({ type: IntegrationResponseDto, isArray: true })
-  list(
-    @CurrentUser() user: JwtPayload,
-  ): Promise<IntegrationResponseDto[]> {
+  list(@CurrentUser() user: JwtPayload): Promise<IntegrationResponseDto[]> {
     return this.listCurrentBusiness(user);
   }
 
   @Get('me')
   @ApiOkResponse({ type: IntegrationResponseDto, isArray: true })
-  listMe(
-    @CurrentUser() user: JwtPayload,
-  ): Promise<IntegrationResponseDto[]> {
+  listMe(@CurrentUser() user: JwtPayload): Promise<IntegrationResponseDto[]> {
     return this.listCurrentBusiness(user);
   }
 
@@ -145,10 +141,9 @@ export class IntegrationsController {
     isEnabled: boolean;
     autoReplyEnabled: boolean;
     status: string | null;
-    phoneNumberId: string | null;
-    wabaId: string | null;
     displayLabel: string | null;
     accessTokenEncrypted: string | null;
+    phoneNumberId: string | null;
     configJson: Record<string, unknown> | null;
   }): IntegrationResponseDto {
     return {
@@ -159,8 +154,6 @@ export class IntegrationsController {
       isEnabled: integration.isEnabled,
       autoReplyEnabled: integration.autoReplyEnabled,
       status: integration.status as IntegrationResponseDto['status'] | null,
-      phoneNumberId: integration.phoneNumberId,
-      wabaId: integration.wabaId,
       displayLabel: integration.displayLabel ?? (integration.isConnected ? this.resolveDisplayLabel(integration) : null),
       maskedPhoneNumber: this.resolveMaskedPhoneNumber(integration),
       hasAccessToken: Boolean(integration.accessTokenEncrypted?.trim()),
@@ -176,7 +169,6 @@ export class IntegrationsController {
   private resolveDisplayLabel(integration: {
     provider: IntegrationProvider;
     phoneNumberId: string | null;
-    wabaId: string | null;
     configJson: Record<string, unknown> | null;
   }): string | null {
     const configJson = integration.configJson ?? {};
@@ -193,14 +185,8 @@ export class IntegrationsController {
       return candidates[0];
     }
 
-    if (integration.provider === IntegrationProvider.WHATSAPP) {
-      if (integration.phoneNumberId) {
-        return `WhatsApp ${integration.phoneNumberId}`;
-      }
-
-      if (integration.wabaId) {
-        return `WhatsApp ${integration.wabaId}`;
-      }
+    if (integration.provider === IntegrationProvider.WHATSAPP && integration.phoneNumberId) {
+      return `WhatsApp ${integration.phoneNumberId}`;
     }
 
     return integration.provider.replaceAll('_', ' ');
@@ -230,7 +216,7 @@ export class IntegrationsController {
       return phoneNumberId;
     }
 
-    return `${phoneNumberId.slice(0, 2)}••••${phoneNumberId.slice(-2)}`;
+    return `${phoneNumberId.slice(0, 2)}****${phoneNumberId.slice(-2)}`;
   }
 
   private readString(value: unknown): string | null {

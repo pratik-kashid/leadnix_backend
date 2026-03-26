@@ -25,12 +25,6 @@ export class IntegrationResponseDto {
   status: IntegrationStatus | null;
 
   @ApiPropertyOptional({ nullable: true })
-  phoneNumberId: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  wabaId: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
   displayLabel: string | null;
 
   @ApiPropertyOptional({ nullable: true })
