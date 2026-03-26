@@ -14,6 +14,7 @@ import { BusinessesService } from '../businesses/businesses.service';
 import { IntegrationProvider } from '../common/enums/integration-provider.enum';
 import { IntegrationStatus } from '../common/enums/integration-status.enum';
 import { Integration } from './entities/integration.entity';
+import { WhatsAppOauthCallbackResponseDto } from './dto/whatsapp-oauth-callback-response.dto';
 
 const SUPPORTED_PROVIDERS = [
   IntegrationProvider.WHATSAPP,
@@ -179,6 +180,52 @@ export class IntegrationsService {
       businessId,
       manager,
     );
+  }
+
+  async prepareWhatsAppOauthCallback(
+    query: Record<string, unknown>,
+  ): Promise<WhatsAppOauthCallbackResponseDto> {
+    const error = this.firstString(query, ['error']);
+    const errorDescription = this.firstString(query, ['error_description', 'errorDescription']);
+    const state = this.firstString(query, ['state']);
+    const wabaId = this.firstString(query, ['wabaId', 'waba_id']);
+    const phoneNumberId = this.firstString(query, ['phoneNumberId', 'phone_number_id']);
+    const businessAccountName = this.firstString(query, ['businessAccountName', 'business_account_name']);
+    const displayLabel =
+      this.firstString(query, ['displayLabel', 'display_label']) ??
+      this.deriveDisplayLabel(phoneNumberId, businessAccountName);
+    const configJson = this.parseJsonValue(
+      this.firstString(query, ['configJson', 'config_json', 'metadata']),
+    );
+
+    const normalizedConfigJson: Record<string, unknown> = {
+      connectionSource: 'meta_embedded_signup',
+      ...(state ? { state } : {}),
+      ...(configJson ?? {}),
+    };
+
+    const completionReady = Boolean(wabaId && phoneNumberId && displayLabel);
+
+    return {
+      success: !error,
+      provider: 'WHATSAPP',
+      completionReady,
+      message: error
+        ? 'WhatsApp onboarding returned an error.'
+        : completionReady
+          ? 'WhatsApp onboarding callback received. Use the completion payload to attach it to the current business.'
+          : 'WhatsApp onboarding callback received, but some completion details are missing.',
+      state: state ?? null,
+      error: error ?? null,
+      errorDescription: errorDescription ?? null,
+      completionPayload: {
+        wabaId: wabaId ?? null,
+        phoneNumberId: phoneNumberId ?? null,
+        displayLabel: displayLabel ?? null,
+        businessAccountName: businessAccountName ?? null,
+        configJson: Object.keys(normalizedConfigJson).length > 0 ? normalizedConfigJson : null,
+      },
+    };
   }
 
   private async upsertWhatsAppConnection(
@@ -520,6 +567,53 @@ export class IntegrationsService {
     const record = rawResponse as WhatsAppSendResponse;
     const messageId = record.messages?.[0]?.id;
     return typeof messageId === 'string' ? messageId : null;
+  }
+
+  private firstString(query: Record<string, unknown>, keys: string[]): string | null {
+    for (const key of keys) {
+      const value = this.readString(query[key]);
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  private deriveDisplayLabel(phoneNumberId: string | null, businessAccountName: string | null): string | null {
+    if (businessAccountName) {
+      return businessAccountName;
+    }
+
+    return phoneNumberId ? 'WhatsApp account' : 'WhatsApp';
+  }
+
+  private parseJsonValue(value: string | null): Record<string, unknown> | null {
+    if (!value) {
+      return null;
+    }
+
+    try {
+      const decoded = JSON.parse(value);
+      if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+        return decoded as Record<string, unknown>;
+      }
+    } catch (_) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(value));
+        if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+          return decoded as Record<string, unknown>;
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  private readString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
   }
 
   private normalizePhoneNumber(phone: string): string {

@@ -185,8 +185,8 @@ export class IntegrationsController {
       return candidates[0];
     }
 
-    if (integration.provider === IntegrationProvider.WHATSAPP && integration.phoneNumberId) {
-      return `WhatsApp ${integration.phoneNumberId}`;
+    if (integration.provider === IntegrationProvider.WHATSAPP) {
+      return 'WhatsApp account';
     }
 
     return integration.provider.replaceAll('_', ' ');
