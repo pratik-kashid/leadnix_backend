@@ -194,6 +194,16 @@ export class MessagesService {
         );
 
         if (!activeWhatsAppIntegration) {
+          const whatsappIntegration = await this.integrationsService.findIntegrationForBusiness(
+            conversation.businessId,
+            IntegrationProvider.WHATSAPP,
+            entityManager,
+          );
+
+          if (whatsappIntegration?.isConnected && !whatsappIntegration.isEnabled) {
+            throw new BadRequestException('WhatsApp integration is disabled for this business');
+          }
+
           throw new BadRequestException('WhatsApp integration is not connected or enabled for this business');
         }
 

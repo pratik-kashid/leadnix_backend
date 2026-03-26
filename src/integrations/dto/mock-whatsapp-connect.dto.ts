@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsString } from 'class-validator';
 
-export class MockWhatsappConnectDto {
+export class WhatsappConnectDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -22,3 +22,5 @@ export class MockWhatsappConnectDto {
   @IsNotEmpty()
   accessToken: string;
 }
+
+export class MockWhatsappConnectDto extends WhatsappConnectDto {}

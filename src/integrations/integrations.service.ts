@@ -125,7 +125,7 @@ export class IntegrationsService {
     return this.getRepository(manager).save(integration);
   }
 
-  async connectMockWhatsApp(
+  async connectWhatsApp(
     userId: string,
     dto: {
       phoneNumberId: string;
@@ -222,6 +222,20 @@ export class IntegrationsService {
         provider,
         isConnected: true,
         isEnabled: true,
+      },
+    });
+  }
+
+  async findIntegrationForBusiness(
+    businessId: string,
+    provider: IntegrationProvider,
+    manager?: EntityManager,
+  ): Promise<Integration | null> {
+    const repository = this.getRepository(manager);
+    return repository.findOne({
+      where: {
+        businessId,
+        provider,
       },
     });
   }

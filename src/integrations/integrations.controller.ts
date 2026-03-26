@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { IntegrationProvider } from '../common/enums/integration-provider.enum';
-import { MockWhatsappConnectDto } from './dto/mock-whatsapp-connect.dto';
+import { MockWhatsappConnectDto, WhatsappConnectDto } from './dto/mock-whatsapp-connect.dto';
 import { UpdateIntegrationAutoReplyDto } from './dto/update-integration-auto-reply.dto';
 import { UpdateIntegrationEnabledDto } from './dto/update-integration-enabled.dto';
 import { IntegrationResponseDto } from './dto/integration-response.dto';
@@ -17,10 +17,25 @@ import { IntegrationsService } from './integrations.service';
 export class IntegrationsController {
   constructor(private readonly integrationsService: IntegrationsService) {}
 
+  @Post('whatsapp/connect')
+  @ApiOperation({
+    summary: 'Connect WhatsApp for the current business',
+    description: 'Creates or updates the current business WhatsApp integration using the provided ownership details.',
+  })
+  @ApiOkResponse({ type: IntegrationResponseDto })
+  connectWhatsapp(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: WhatsappConnectDto,
+  ): Promise<IntegrationResponseDto> {
+    return this.integrationsService
+      .connectWhatsApp(user.sub, dto, user.businessId ?? undefined)
+      .then((integration) => this.toResponse(integration));
+  }
+
   @Post('whatsapp/connect/mock')
   @ApiOperation({
     summary: 'Temporary development-only WhatsApp connect flow',
-    description: 'Creates or updates the current business WhatsApp integration for local/dev testing only.',
+    description: 'Legacy mock alias kept for local/dev testing only.',
   })
   @ApiOkResponse({ type: IntegrationResponseDto })
   connectMockWhatsapp(
@@ -28,7 +43,7 @@ export class IntegrationsController {
     @Body() dto: MockWhatsappConnectDto,
   ): Promise<IntegrationResponseDto> {
     return this.integrationsService
-      .connectMockWhatsApp(user.sub, dto, user.businessId ?? undefined)
+      .connectWhatsApp(user.sub, dto, user.businessId ?? undefined)
       .then((integration) => this.toResponse(integration));
   }
 
@@ -132,6 +147,7 @@ export class IntegrationsController {
       phoneNumberId: integration.phoneNumberId,
       wabaId: integration.wabaId,
       displayLabel: integration.displayLabel ?? (integration.isConnected ? this.resolveDisplayLabel(integration) : null),
+      maskedPhoneNumber: this.resolveMaskedPhoneNumber(integration),
       hasAccessToken: Boolean(integration.accessTokenEncrypted?.trim()),
     };
   }
@@ -173,6 +189,33 @@ export class IntegrationsController {
     }
 
     return integration.provider.replaceAll('_', ' ');
+  }
+
+  private resolveMaskedPhoneNumber(integration: {
+    phoneNumberId: string | null;
+    configJson: Record<string, unknown> | null;
+  }): string | null {
+    const configJson = integration.configJson ?? {};
+    const candidates = [
+      this.readString(configJson.displayPhoneNumber),
+      this.readString(configJson.display_phone_number),
+      this.readString(configJson.phoneNumber),
+    ].filter((value): value is string => Boolean(value));
+
+    if (candidates.length > 0) {
+      return candidates[0];
+    }
+
+    const phoneNumberId = this.readString(integration.phoneNumberId);
+    if (!phoneNumberId) {
+      return null;
+    }
+
+    if (phoneNumberId.length <= 4) {
+      return phoneNumberId;
+    }
+
+    return `${phoneNumberId.slice(0, 2)}••••${phoneNumberId.slice(-2)}`;
   }
 
   private readString(value: unknown): string | null {

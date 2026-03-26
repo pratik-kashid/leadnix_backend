@@ -33,6 +33,9 @@ export class IntegrationResponseDto {
   @ApiPropertyOptional({ nullable: true })
   displayLabel: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  maskedPhoneNumber: string | null;
+
   @ApiProperty()
   hasAccessToken: boolean;
 }
