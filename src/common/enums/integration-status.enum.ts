@@ -1,0 +1,6 @@
+export enum IntegrationStatus {
+  DISCONNECTED = 'DISCONNECTED',
+  CONNECTED = 'CONNECTED',
+  DISABLED = 'DISABLED',
+  ERROR = 'ERROR',
+}

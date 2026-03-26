@@ -1,0 +1,6 @@
+export enum IntegrationProvider {
+  WHATSAPP = 'WHATSAPP',
+  INSTAGRAM = 'INSTAGRAM',
+  FACEBOOK = 'FACEBOOK',
+  WEBSITE_FORM = 'WEBSITE_FORM',
+}

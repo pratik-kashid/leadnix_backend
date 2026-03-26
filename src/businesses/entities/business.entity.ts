@@ -1,6 +1,7 @@
 import { BeforeInsert, Column, Entity, OneToMany, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { TeamMember } from '../../team-members/entities/team-member.entity';
+import { Integration } from '../../integrations/entities/integration.entity';
 
 @Entity({ name: 'businesses' })
 export class Business {
@@ -33,6 +34,9 @@ export class Business {
 
   @OneToMany(() => TeamMember, (teamMember) => teamMember.business)
   teamMembers: TeamMember[];
+
+  @OneToMany(() => Integration, (integration) => integration.business)
+  integrations: Integration[];
 
   @BeforeInsert()
   ensurePublicLeadToken() {

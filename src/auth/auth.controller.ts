@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiTags } fr
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
@@ -42,6 +43,15 @@ export class AuthController {
   @ApiOkResponse()
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiBody({ type: ChangePasswordDto })
+  @ApiOkResponse()
+  changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(user.sub, dto);
   }
 
   @Get('me')

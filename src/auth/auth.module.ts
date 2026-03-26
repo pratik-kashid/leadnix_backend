@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { UsersModule } from '../users/users.module';
 import { BusinessesModule } from '../businesses/businesses.module';
 import { TeamMembersModule } from '../team-members/team-members.module';
+import { CommonModule } from '../common/common.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -25,6 +26,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     UsersModule,
     BusinessesModule,
     TeamMembersModule,
+    CommonModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

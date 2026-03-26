@@ -63,7 +63,7 @@ import { PublicModule } from './public/public.module';
             configService.get<string>('DATABASE_NAME') ??
             configService.get<string>('DB_NAME'),
           autoLoadEntities: true,
-          synchronize: true,
+          synchronize: false,
           ssl: isSslEnabled ? { rejectUnauthorized: false } : undefined,
         };
       },

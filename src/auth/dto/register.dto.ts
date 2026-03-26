@@ -1,25 +1,33 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { Matches } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Aarav Sharma' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Name is required.' })
   name: string;
 
   @ApiProperty({ example: 'aarav@leadnix.com' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Email is required.' })
   email: string;
 
   @ApiProperty({ example: 'StrongPassword123!' })
   @IsString()
-  @IsNotEmpty()
-  @MinLength(8)
+  @IsNotEmpty({ message: 'Password is required.' })
+  @MinLength(8, { message: 'Password must be at least 8 characters long.' })
+  @Matches(/[A-Z]/, { message: 'Password must contain at least one uppercase letter.' })
+  @Matches(/[a-z]/, { message: 'Password must contain at least one lowercase letter.' })
+  @Matches(/[0-9]/, { message: 'Password must contain at least one number.' })
   password: string;
 
   @ApiProperty({ example: 'Leadnix India' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Business name is required.' })
   businessName: string;
 }

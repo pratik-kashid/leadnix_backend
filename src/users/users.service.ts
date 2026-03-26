@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -30,6 +30,10 @@ export class UsersService {
     return this.getRepository(manager).save(user);
   }
 
+  update(user: User, manager?: EntityManager): Promise<User> {
+    return this.getRepository(manager).save(user);
+  }
+
   create(
     input: Pick<User, 'name' | 'email' | 'passwordHash' | 'isActive'>,
     manager?: EntityManager,
@@ -41,5 +45,34 @@ export class UsersService {
     });
 
     return repository.save(user);
+  }
+
+  async updateMe(user: User | null, input: Partial<Pick<User, 'name' | 'email'>>): Promise<User> {
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (input.email && input.email !== user.email) {
+      const existingUser = await this.findByEmail(input.email);
+      if (existingUser && existingUser.id !== user.id) {
+        throw new ConflictException('Email is already registered');
+      }
+      user.email = input.email;
+    }
+
+    if (typeof input.name === 'string' && input.name.trim().length > 0) {
+      user.name = input.name.trim();
+    }
+
+    return this.save(user);
+  }
+
+  async updateProfilePhoto(user: User | null, profilePhotoUrl: string | null): Promise<User> {
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.profilePhotoUrl = profilePhotoUrl;
+    return this.save(user);
   }
 }

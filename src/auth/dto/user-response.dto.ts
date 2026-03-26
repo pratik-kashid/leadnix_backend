@@ -10,6 +10,9 @@ export class UserResponseDto {
   @ApiProperty()
   email: string;
 
+  @ApiProperty({ required: false, nullable: true })
+  profilePhotoUrl: string | null;
+
   @ApiProperty()
   isActive: boolean;
 

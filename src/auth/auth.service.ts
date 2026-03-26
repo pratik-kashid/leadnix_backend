@@ -1,14 +1,16 @@
 import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryFailedError } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { BusinessesService } from '../businesses/businesses.service';
 import { TeamMembersService } from '../team-members/team-members.service';
+import { EmailService } from '../common/email/email.service';
 import { Role } from '../common/enums/role.enum';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
@@ -23,6 +25,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly businessesService: BusinessesService,
     private readonly teamMembersService: TeamMembersService,
+    private readonly emailService: EmailService,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
   ) {}
@@ -35,41 +38,48 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(registerDto.password, 12);
 
-    const { user, business } = await this.dataSource.transaction(async (manager) => {
-      const user = await this.usersService.create(
-        {
-          name: registerDto.name,
-          email: registerDto.email,
-          passwordHash: hashedPassword,
-          isActive: true,
-        },
-        manager,
-      );
+    try {
+      const { user, business } = await this.dataSource.transaction(async (manager) => {
+        const user = await this.usersService.create(
+          {
+            name: registerDto.name,
+            email: registerDto.email,
+            passwordHash: hashedPassword,
+            isActive: true,
+          },
+          manager,
+        );
 
-      const business = await this.businessesService.create(
-        {
-          name: registerDto.businessName,
-          phone: null,
-          email: null,
-          industry: null,
-          timezone: null,
-        },
-        manager,
-      );
+        const business = await this.businessesService.create(
+          {
+            name: registerDto.businessName,
+            phone: null,
+            email: null,
+            industry: null,
+            timezone: null,
+          },
+          manager,
+        );
 
-      await this.teamMembersService.create(
-        {
-          userId: user.id,
-          businessId: business.id,
-          role: Role.OWNER,
-        },
-        manager,
-      );
+        await this.teamMembersService.create(
+          {
+            userId: user.id,
+            businessId: business.id,
+            role: Role.OWNER,
+          },
+          manager,
+        );
 
-      return { user, business };
-    });
+        return { user, business };
+      });
 
-    return this.buildAuthResponse(user, business);
+      return this.buildAuthResponse(user, business);
+    } catch (error) {
+      if (this.isDuplicateEmailError(error)) {
+        throw new ConflictException('Email is already registered');
+      }
+      throw error;
+    }
   }
 
   async login(loginDto: LoginDto): Promise<AuthResponseDto> {
@@ -95,39 +105,98 @@ export class AuthService {
     return this.buildAuthResponse(user, membership.business);
   }
 
-  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string; resetToken?: string }> {
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    const message = 'If an account exists for that email, an OTP has been sent.';
     const user = await this.usersService.findByEmail(dto.email);
     if (!user || !user.isActive) {
-      return {
-        message: 'If the email exists, a reset token was generated.',
-      };
+      return { message };
     }
 
-    const resetToken = randomBytes(32).toString('hex');
-    user.passwordResetTokenHash = this.hashToken(resetToken);
-    user.passwordResetExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    const now = Date.now();
+    const lastSentAt = user.passwordResetOtpSentAt?.getTime() ?? 0;
+    if (now - lastSentAt < 60 * 1000 && user.passwordResetOtpExpiresAt && user.passwordResetOtpExpiresAt.getTime() > now) {
+      return { message };
+    }
+
+    const otp = this.generateOtp();
+    user.passwordResetOtpHash = this.hashToken(otp);
+    user.passwordResetOtpExpiresAt = new Date(now + 10 * 60 * 1000);
+    user.passwordResetOtpAttempts = 0;
+    user.passwordResetOtpSentAt = new Date(now);
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpiresAt = null;
     await this.usersService.save(user);
 
-    return {
-      message: 'If the email exists, a reset token was generated.',
-      resetToken: process.env.NODE_ENV === 'production' ? undefined : resetToken,
-    };
+    await this.emailService.sendPasswordResetOtp({
+      email: user.email,
+      otp,
+      name: user.name,
+    });
+
+    return { message };
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
-    const tokenHash = this.hashToken(dto.token);
-    const user = await this.usersService.findByResetTokenHash(tokenHash);
+    const user = await this.usersService.findByEmail(dto.email);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
 
-    if (!user || !user.passwordResetExpiresAt || user.passwordResetExpiresAt.getTime() < Date.now()) {
-      throw new UnauthorizedException('Invalid or expired reset token');
+    if (
+      !user.passwordResetOtpHash ||
+      !user.passwordResetOtpExpiresAt ||
+      user.passwordResetOtpExpiresAt.getTime() < Date.now()
+    ) {
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    if (user.passwordResetOtpAttempts >= 5) {
+      user.passwordResetOtpHash = null;
+      user.passwordResetOtpExpiresAt = null;
+      user.passwordResetOtpAttempts = 0;
+      user.passwordResetOtpSentAt = null;
+      await this.usersService.save(user);
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    const otpHash = this.hashToken(dto.otp);
+    if (otpHash !== user.passwordResetOtpHash) {
+      user.passwordResetOtpAttempts += 1;
+      await this.usersService.save(user);
+      throw new UnauthorizedException('Invalid or expired OTP');
     }
 
     user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
     user.passwordResetTokenHash = null;
     user.passwordResetExpiresAt = null;
+    user.passwordResetOtpHash = null;
+    user.passwordResetOtpExpiresAt = null;
+    user.passwordResetOtpAttempts = 0;
+    user.passwordResetOtpSentAt = null;
     await this.usersService.save(user);
 
     return { message: 'Password reset successful' };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<{ message: string }> {
+    const user = await this.usersService.findById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Invalid current password');
+    }
+
+    const currentPasswordMatches = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!currentPasswordMatches) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new ConflictException('New password must be different from the current password');
+    }
+
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.usersService.save(user);
+
+    return { message: 'Password changed successfully' };
   }
 
   async me(payload: JwtPayload): Promise<MeResponseDto> {
@@ -172,6 +241,7 @@ export class AuthService {
       id: user.id,
       name: user.name,
       email: user.email,
+      profilePhotoUrl: user.profilePhotoUrl,
       isActive: user.isActive,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -194,5 +264,24 @@ export class AuthService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private generateOtp(): string {
+    return randomInt(100000, 1000000).toString();
+  }
+
+  private isDuplicateEmailError(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) {
+      return false;
+    }
+
+    const driverError = error.driverError as { code?: string; detail?: string; constraint?: string };
+    if (driverError.code !== '23505') {
+      return false;
+    }
+
+    const detail = driverError.detail?.toLowerCase() ?? '';
+    const constraint = driverError.constraint?.toLowerCase() ?? '';
+    return detail.includes('email') || constraint.includes('email');
   }
 }
