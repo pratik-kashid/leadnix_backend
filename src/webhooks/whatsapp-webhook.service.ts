@@ -255,10 +255,14 @@ export class WhatsappWebhookService {
       return;
     }
 
-    await this.messagesService.sendForBusiness(businessId, {
+    const outbound = await this.messagesService.sendForBusiness(businessId, {
       conversationId,
       content: replyText,
     } as SendMessageDto);
+
+    this.logger.debug(
+      `WhatsApp auto-reply sent for business ${businessId}, lead ${leadId}, aiRun=${suggestion.aiRunId}, message=${outbound.id}`,
+    );
   }
 
   private async findOrCreateContact(
