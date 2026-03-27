@@ -183,18 +183,22 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    this.logger.log(`forgot-password received for ${dto.email}`);
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) {
+      this.logger.warn(`forgot-password email not registered: ${dto.email}`);
       throw new NotFoundException('Email not registered');
     }
 
     const now = Date.now();
     const lastSentAt = user.passwordResetOtpSentAt?.getTime() ?? 0;
     if (now - lastSentAt < 60 * 1000 && user.passwordResetOtpExpiresAt && user.passwordResetOtpExpiresAt.getTime() > now) {
+      this.logger.log(`forgot-password throttled for ${dto.email}; reusing existing valid OTP window`);
       return { message: 'OTP sent successfully' };
     }
 
     const otp = this.generateOtp();
+    this.logger.log(`forgot-password generated OTP for ${dto.email}`);
     user.passwordResetOtpHash = this.hashToken(otp);
     user.passwordResetOtpExpiresAt = new Date(now + PASSWORD_RESET_OTP_EXPIRY_MINUTES * 60 * 1000);
     user.passwordResetOtpAttempts = 0;
@@ -203,12 +207,21 @@ export class AuthService {
     user.passwordResetExpiresAt = null;
     await this.usersService.save(user);
 
-    await this.emailService.sendPasswordResetOtp({
-      email: user.email,
-      otp,
-      name: user.name,
-      expiresInMinutes: PASSWORD_RESET_OTP_EXPIRY_MINUTES,
-    });
+    try {
+      await this.emailService.sendPasswordResetOtp({
+        email: user.email,
+        otp,
+        name: user.name,
+        expiresInMinutes: PASSWORD_RESET_OTP_EXPIRY_MINUTES,
+      });
+      this.logger.log(`forgot-password OTP email sent successfully to ${dto.email}`);
+    } catch (error) {
+      this.logger.error(
+        `forgot-password OTP email failed for ${dto.email}: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
 
     return { message: 'OTP sent successfully' };
   }

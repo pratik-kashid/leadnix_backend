@@ -76,7 +76,9 @@ export class SmtpEmailService extends EmailService {
           return;
         } catch (fallbackError) {
           this.logger.error(
-            `Failed to send OTP email to ${input.email}`,
+            `Failed to send OTP email to ${input.email}: ${
+              fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+            }`,
             fallbackError instanceof Error ? fallbackError.stack : undefined,
           );
           throw new ServiceUnavailableException('Unable to send OTP email at this time');
@@ -84,7 +86,7 @@ export class SmtpEmailService extends EmailService {
       }
 
       this.logger.error(
-        `Failed to send OTP email to ${input.email}`,
+        `Failed to send OTP email to ${input.email}: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw new ServiceUnavailableException('Unable to send OTP email at this time');
