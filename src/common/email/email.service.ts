@@ -1,20 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+export type PasswordResetOtpEmailInput = {
+  email: string;
+  otp: string;
+  name?: string | null;
+  expiresInMinutes?: number;
+};
 
 export abstract class EmailService {
-  abstract sendPasswordResetOtp(input: {
-    email: string;
-    otp: string;
-    name?: string | null;
-  }): Promise<void>;
-}
-
-@Injectable()
-export class ConsoleEmailService implements EmailService {
-  private readonly logger = new Logger(ConsoleEmailService.name);
-
-  async sendPasswordResetOtp(input: { email: string; otp: string; name?: string | null }): Promise<void> {
-    this.logger.log(
-      `Password reset OTP for ${input.email}: ${input.otp}${input.name ? ` (name: ${input.name})` : ''}`,
-    );
-  }
+  abstract sendPasswordResetOtp(input: PasswordResetOtpEmailInput): Promise<void>;
 }

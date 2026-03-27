@@ -1,8 +1,9 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { BusinessesService } from '../businesses/businesses.service';
 import { TeamMembersService } from '../team-members/team-members.service';
@@ -14,11 +15,15 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyResetOtpDto } from './dto/verify-reset-otp.dto';
+import { GoogleAuthDto } from './dto/google-auth.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { MeResponseDto } from './dto/me-response.dto';
 import { JwtPayload } from './types/jwt-payload.type';
 import { User } from '../users/entities/user.entity';
 import { Business } from '../businesses/entities/business.entity';
+import { OAuth2Client } from 'google-auth-library';
+
+const PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10;
 
 @Injectable()
 export class AuthService {
@@ -29,6 +34,7 @@ export class AuthService {
     private readonly emailService: EmailService,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
@@ -106,6 +112,74 @@ export class AuthService {
     return this.buildAuthResponse(user, membership.business);
   }
 
+  async googleAuth(dto: GoogleAuthDto): Promise<AuthResponseDto> {
+    const payload = await this.verifyGoogleIdToken(dto.idToken);
+    const email = payload.email?.trim().toLowerCase();
+    if (!email) {
+      throw new UnauthorizedException('Google account email is missing');
+    }
+
+    if (payload.email_verified !== true) {
+      throw new UnauthorizedException('Google email is not verified');
+    }
+
+    const profileName = payload.name?.trim() || email;
+    const profilePhotoUrl = typeof payload.picture === 'string' && payload.picture.trim().length > 0
+      ? payload.picture.trim()
+      : null;
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      let user = await this.usersService.findByEmail(email, manager);
+      let business: Business | null = null;
+
+      if (user) {
+        if (!user.isActive) {
+          throw new ForbiddenException('Account is inactive');
+        }
+
+        if (!user.name?.trim() && profileName) {
+          user.name = profileName;
+        }
+        if (!user.profilePhotoUrl && profilePhotoUrl) {
+          user.profilePhotoUrl = profilePhotoUrl;
+        }
+        await this.usersService.save(user, manager);
+
+        let membership = await this.teamMembersService.findFirstForUser(user.id, manager);
+        if (membership?.business) {
+          business = membership.business;
+        } else {
+          business = await this.createGoogleBusinessAndMembership(user, profileName, manager);
+        }
+      } else {
+        user = await this.usersService.create(
+          {
+            name: profileName,
+            email,
+            passwordHash: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
+            isActive: true,
+          },
+          manager,
+        );
+
+        if (profilePhotoUrl) {
+          user.profilePhotoUrl = profilePhotoUrl;
+          await this.usersService.save(user, manager);
+        }
+
+        business = await this.createGoogleBusinessAndMembership(user, profileName, manager);
+      }
+
+      if (!business) {
+        throw new UnauthorizedException('Unable to create or locate a business for this Google account');
+      }
+
+      return { user, business };
+    });
+
+    return this.buildAuthResponse(result.user, result.business);
+  }
+
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) {
@@ -120,7 +194,7 @@ export class AuthService {
 
     const otp = this.generateOtp();
     user.passwordResetOtpHash = this.hashToken(otp);
-    user.passwordResetOtpExpiresAt = new Date(now + 10 * 60 * 1000);
+    user.passwordResetOtpExpiresAt = new Date(now + PASSWORD_RESET_OTP_EXPIRY_MINUTES * 60 * 1000);
     user.passwordResetOtpAttempts = 0;
     user.passwordResetOtpSentAt = new Date(now);
     user.passwordResetTokenHash = null;
@@ -131,6 +205,7 @@ export class AuthService {
       email: user.email,
       otp,
       name: user.name,
+      expiresInMinutes: PASSWORD_RESET_OTP_EXPIRY_MINUTES,
     });
 
     return { message: 'OTP sent successfully' };
@@ -265,6 +340,76 @@ export class AuthService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private async verifyGoogleIdToken(idToken: string) {
+    const clientIds = this.getGoogleClientIds();
+    if (clientIds.length === 0) {
+      throw new UnauthorizedException('Google sign-in is not configured');
+    }
+
+    try {
+      const client = new OAuth2Client();
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: clientIds,
+      });
+
+      const payload = ticket.getPayload();
+      if (!payload) {
+        throw new UnauthorizedException('Invalid Google token');
+      }
+
+      return payload;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Invalid Google token');
+    }
+  }
+
+  private getGoogleClientIds(): string[] {
+    const raw = [
+      this.configService.get<string>('GOOGLE_CLIENT_ID'),
+      this.configService.get<string>('GOOGLE_WEB_CLIENT_ID'),
+      this.configService.get<string>('GOOGLE_SIGN_IN_SERVER_CLIENT_ID'),
+      this.configService.get<string>('GOOGLE_CLIENT_IDS'),
+    ]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .flatMap((value) => value.split(','))
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    return [...new Set(raw)];
+  }
+
+  private async createGoogleBusinessAndMembership(
+    user: User,
+    profileName: string,
+    manager: EntityManager,
+  ): Promise<Business> {
+    const business = await this.businessesService.create(
+      {
+        name: profileName ? `${profileName}'s Workspace` : 'Leadnix Workspace',
+        phone: null,
+        email: null,
+        industry: null,
+        timezone: null,
+      },
+      manager,
+    );
+
+    await this.teamMembersService.create(
+      {
+        userId: user.id,
+        businessId: business.id,
+        role: Role.OWNER,
+      },
+      manager,
+    );
+
+    return business;
   }
 
   private generateOtp(): string {

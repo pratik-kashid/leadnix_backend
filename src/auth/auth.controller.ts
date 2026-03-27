@@ -5,6 +5,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { GoogleAuthDto } from './dto/google-auth.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyResetOtpDto } from './dto/verify-reset-otp.dto';
 import { VerifyResetOtpResponseDto } from './dto/verify-reset-otp-response.dto';
@@ -31,6 +32,13 @@ export class AuthController {
   @ApiOkResponse({ type: AuthResponseDto })
   login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
     return this.authService.login(loginDto);
+  }
+
+  @Post('google')
+  @ApiBody({ type: GoogleAuthDto })
+  @ApiOkResponse({ type: AuthResponseDto })
+  googleAuth(@Body() dto: GoogleAuthDto): Promise<AuthResponseDto> {
+    return this.authService.googleAuth(dto);
   }
 
   @Post('forgot-password')
