@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource, QueryFailedError } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -106,16 +106,15 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
-    const message = 'If an account exists for that email, an OTP has been sent.';
     const user = await this.usersService.findByEmail(dto.email);
-    if (!user || !user.isActive) {
-      return { message };
+    if (!user) {
+      throw new NotFoundException('Email not registered');
     }
 
     const now = Date.now();
     const lastSentAt = user.passwordResetOtpSentAt?.getTime() ?? 0;
     if (now - lastSentAt < 60 * 1000 && user.passwordResetOtpExpiresAt && user.passwordResetOtpExpiresAt.getTime() > now) {
-      return { message };
+      return { message: 'OTP sent successfully' };
     }
 
     const otp = this.generateOtp();
@@ -133,7 +132,7 @@ export class AuthService {
       name: user.name,
     });
 
-    return { message };
+    return { message: 'OTP sent successfully' };
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
