@@ -6,15 +6,14 @@ import { EmailService, PasswordResetOtpEmailInput } from './email.service';
 @Injectable()
 export class SmtpEmailService extends EmailService {
   private readonly logger = new Logger(SmtpEmailService.name);
-  private transporter: Transporter | null = null;
-  private fallbackTransporter: Transporter | null = null;
+  private readonly transporters = new Map<string, Transporter>();
 
   constructor(private readonly configService: ConfigService) {
     super();
   }
 
   async sendPasswordResetOtp(input: PasswordResetOtpEmailInput): Promise<void> {
-    const transporter = this.getTransporter();
+    const transporters = this.getTransporters();
     const from = this.configService.get<string>('MAIL_FROM')?.trim();
 
     if (!from) {
@@ -47,57 +46,49 @@ export class SmtpEmailService extends EmailService {
       </div>
     `;
 
-    try {
-      const result = await transporter.sendMail({
-        from,
-        to: input.email,
-        subject,
-        text,
-        html,
-      });
+    for (let index = 0; index < transporters.length; index += 1) {
+      const transporter = transporters[index];
+      try {
+        const result = await transporter.sendMail({
+          from,
+          to: input.email,
+          subject,
+          text,
+          html,
+        });
 
-      this.logger.log(`Password reset OTP email queued for ${input.email} (${result.messageId ?? 'no message id'})`);
-      return;
-    } catch (error) {
-      const fallbackTransporter = this.getFallbackTransporter();
-      if (fallbackTransporter) {
+        this.logger.log(
+          `Password reset OTP email queued for ${input.email} (${result.messageId ?? 'no message id'})`,
+        );
+        return;
+      } catch (error) {
+        const isLastAttempt = index === transporters.length - 1;
         try {
-          const result = await fallbackTransporter.sendMail({
-            from,
-            to: input.email,
-            subject,
-            text,
-            html,
-          });
-
-          this.logger.log(
-            `Password reset OTP email queued via Gmail fallback for ${input.email} (${result.messageId ?? 'no message id'})`,
+          this.logger.warn(
+            `SMTP attempt ${index + 1}/${transporters.length} failed for ${input.email}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
           );
-          return;
-        } catch (fallbackError) {
+        } catch (_) {
+          // no-op, logging must not block fallback attempts
+        }
+
+        if (isLastAttempt) {
           this.logger.error(
             `Failed to send OTP email to ${input.email}: ${
-              fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+              error instanceof Error ? error.message : String(error)
             }`,
-            fallbackError instanceof Error ? fallbackError.stack : undefined,
+            error instanceof Error ? error.stack : undefined,
           );
           throw new ServiceUnavailableException('Unable to send OTP email at this time');
         }
       }
-
-      this.logger.error(
-        `Failed to send OTP email to ${input.email}: ${error instanceof Error ? error.message : String(error)}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-      throw new ServiceUnavailableException('Unable to send OTP email at this time');
     }
+
+    throw new ServiceUnavailableException('Unable to send OTP email at this time');
   }
 
-  private getTransporter(): Transporter {
-    if (this.transporter) {
-      return this.transporter;
-    }
-
+  private getTransporters(): Transporter[] {
     const host = this.configService.get<string>('SMTP_HOST')?.trim();
     const port = Number(this.configService.get<string>('SMTP_PORT') ?? 0);
     const user = this.configService.get<string>('SMTP_USER')?.trim();
@@ -107,7 +98,35 @@ export class SmtpEmailService extends EmailService {
       throw new Error('SMTP configuration is incomplete');
     }
 
-    this.transporter = nodemailer.createTransport({
+    const normalizedHost = host.toLowerCase();
+    const isGmailHost = normalizedHost === 'smtp.gmail.com' || normalizedHost === 'smtp.googlemail.com';
+    const cacheKey = `${normalizedHost}:${port}:${user}`;
+
+    const primary = this.getOrCreateTransporter(cacheKey, host, port, user, pass);
+    const transporters = [primary];
+
+    if (isGmailHost) {
+      const fallbackPort = port === 465 ? 587 : 465;
+      const fallbackKey = `${normalizedHost}:${fallbackPort}:${user}`;
+      transporters.push(this.getOrCreateTransporter(fallbackKey, host, fallbackPort, user, pass));
+    }
+
+    return transporters;
+  }
+
+  private getOrCreateTransporter(
+    cacheKey: string,
+    host: string,
+    port: number,
+    user: string,
+    pass: string,
+  ): Transporter {
+    const existing = this.transporters.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+
+    const transporter = nodemailer.createTransport({
       host,
       port,
       secure: port === 465,
@@ -115,8 +134,6 @@ export class SmtpEmailService extends EmailService {
       connectionTimeout: 15_000,
       greetingTimeout: 15_000,
       socketTimeout: 30_000,
-      pool: true,
-      maxConnections: 1,
       auth: {
         user,
         pass,
@@ -126,47 +143,8 @@ export class SmtpEmailService extends EmailService {
       },
     });
 
-    return this.transporter;
-  }
-
-  private getFallbackTransporter(): Transporter | null {
-    if (this.fallbackTransporter) {
-      return this.fallbackTransporter;
-    }
-
-    const host = this.configService.get<string>('SMTP_HOST')?.trim();
-    const user = this.configService.get<string>('SMTP_USER')?.trim();
-    const pass = this.configService.get<string>('SMTP_PASS')?.trim();
-
-    if (!host || !user || !pass) {
-      return null;
-    }
-
-    const normalizedHost = host.toLowerCase();
-    if (normalizedHost !== 'smtp.gmail.com' && normalizedHost !== 'smtp.googlemail.com') {
-      return null;
-    }
-
-    this.fallbackTransporter = nodemailer.createTransport({
-      host,
-      port: 465,
-      secure: true,
-      requireTLS: true,
-      connectionTimeout: 15_000,
-      greetingTimeout: 15_000,
-      socketTimeout: 30_000,
-      pool: true,
-      maxConnections: 1,
-      auth: {
-        user,
-        pass,
-      },
-      tls: {
-        rejectUnauthorized: true,
-      },
-    });
-
-    return this.fallbackTransporter;
+    this.transporters.set(cacheKey, transporter);
+    return transporter;
   }
 
   private escapeHtml(value: string): string {
