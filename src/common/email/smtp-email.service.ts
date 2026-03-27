@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import nodemailer, { Transporter } from 'nodemailer';
 import { EmailService, PasswordResetOtpEmailInput } from './email.service';
@@ -7,6 +7,7 @@ import { EmailService, PasswordResetOtpEmailInput } from './email.service';
 export class SmtpEmailService extends EmailService {
   private readonly logger = new Logger(SmtpEmailService.name);
   private transporter: Transporter | null = null;
+  private fallbackTransporter: Transporter | null = null;
 
   constructor(private readonly configService: ConfigService) {
     super();
@@ -56,9 +57,37 @@ export class SmtpEmailService extends EmailService {
       });
 
       this.logger.log(`Password reset OTP email queued for ${input.email} (${result.messageId ?? 'no message id'})`);
+      return;
     } catch (error) {
-      this.logger.error(`Failed to send OTP email to ${input.email}`, error instanceof Error ? error.stack : undefined);
-      throw new Error('Unable to send OTP email at this time');
+      const fallbackTransporter = this.getFallbackTransporter();
+      if (fallbackTransporter) {
+        try {
+          const result = await fallbackTransporter.sendMail({
+            from,
+            to: input.email,
+            subject,
+            text,
+            html,
+          });
+
+          this.logger.log(
+            `Password reset OTP email queued via Gmail fallback for ${input.email} (${result.messageId ?? 'no message id'})`,
+          );
+          return;
+        } catch (fallbackError) {
+          this.logger.error(
+            `Failed to send OTP email to ${input.email}`,
+            fallbackError instanceof Error ? fallbackError.stack : undefined,
+          );
+          throw new ServiceUnavailableException('Unable to send OTP email at this time');
+        }
+      }
+
+      this.logger.error(
+        `Failed to send OTP email to ${input.email}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new ServiceUnavailableException('Unable to send OTP email at this time');
     }
   }
 
@@ -80,13 +109,62 @@ export class SmtpEmailService extends EmailService {
       host,
       port,
       secure: port === 465,
+      requireTLS: port !== 465,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
+      pool: true,
+      maxConnections: 1,
       auth: {
         user,
         pass,
       },
+      tls: {
+        rejectUnauthorized: true,
+      },
     });
 
     return this.transporter;
+  }
+
+  private getFallbackTransporter(): Transporter | null {
+    if (this.fallbackTransporter) {
+      return this.fallbackTransporter;
+    }
+
+    const host = this.configService.get<string>('SMTP_HOST')?.trim();
+    const user = this.configService.get<string>('SMTP_USER')?.trim();
+    const pass = this.configService.get<string>('SMTP_PASS')?.trim();
+
+    if (!host || !user || !pass) {
+      return null;
+    }
+
+    const normalizedHost = host.toLowerCase();
+    if (normalizedHost !== 'smtp.gmail.com' && normalizedHost !== 'smtp.googlemail.com') {
+      return null;
+    }
+
+    this.fallbackTransporter = nodemailer.createTransport({
+      host,
+      port: 465,
+      secure: true,
+      requireTLS: true,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
+      pool: true,
+      maxConnections: 1,
+      auth: {
+        user,
+        pass,
+      },
+      tls: {
+        rejectUnauthorized: true,
+      },
+    });
+
+    return this.fallbackTransporter;
   }
 
   private escapeHtml(value: string): string {
