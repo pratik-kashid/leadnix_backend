@@ -381,7 +381,6 @@ export class AuthService {
 
   private getGoogleClientIds(): string[] {
     const raw = [
-      this.configService.get<string>('GOOGLE_CLIENT_ID'),
       this.configService.get<string>('GOOGLE_WEB_CLIENT_ID'),
       this.configService.get<string>('GOOGLE_SIGN_IN_SERVER_CLIENT_ID'),
       this.configService.get<string>('GOOGLE_CLIENT_IDS'),
