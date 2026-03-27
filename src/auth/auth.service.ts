@@ -13,6 +13,7 @@ import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyResetOtpDto } from './dto/verify-reset-otp.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { MeResponseDto } from './dto/me-response.dto';
 import { JwtPayload } from './types/jwt-payload.type';
@@ -135,33 +136,34 @@ export class AuthService {
     return { message: 'OTP sent successfully' };
   }
 
+  async verifyResetOtp(dto: VerifyResetOtpDto): Promise<{ valid: boolean; message: string }> {
+    const user = await this.usersService.findByEmail(dto.email);
+    if (!user || !user.isActive) {
+      return { valid: false, message: 'Invalid or expired OTP' };
+    }
+
+    const validation = this.validateResetOtp(user, dto.otp);
+    if (!validation.valid) {
+      if (validation.shouldPersist) {
+        await this.usersService.save(user);
+      }
+      return { valid: false, message: 'Invalid or expired OTP' };
+    }
+
+    return { valid: true, message: 'OTP verified' };
+  }
+
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
-    if (
-      !user.passwordResetOtpHash ||
-      !user.passwordResetOtpExpiresAt ||
-      user.passwordResetOtpExpiresAt.getTime() < Date.now()
-    ) {
-      throw new UnauthorizedException('Invalid or expired OTP');
-    }
-
-    if (user.passwordResetOtpAttempts >= 5) {
-      user.passwordResetOtpHash = null;
-      user.passwordResetOtpExpiresAt = null;
-      user.passwordResetOtpAttempts = 0;
-      user.passwordResetOtpSentAt = null;
-      await this.usersService.save(user);
-      throw new UnauthorizedException('Invalid or expired OTP');
-    }
-
-    const otpHash = this.hashToken(dto.otp);
-    if (otpHash !== user.passwordResetOtpHash) {
-      user.passwordResetOtpAttempts += 1;
-      await this.usersService.save(user);
+    const validation = this.validateResetOtp(user, dto.otp);
+    if (!validation.valid) {
+      if (validation.shouldPersist) {
+        await this.usersService.save(user);
+      }
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
@@ -267,6 +269,52 @@ export class AuthService {
 
   private generateOtp(): string {
     return randomInt(100000, 1000000).toString();
+  }
+
+  private validateResetOtp(
+    user: User,
+    otp: string,
+  ): { valid: boolean; shouldPersist: boolean } {
+    if (
+      !user.passwordResetOtpHash ||
+      !user.passwordResetOtpExpiresAt ||
+      user.passwordResetOtpExpiresAt.getTime() < Date.now()
+    ) {
+      return {
+        valid: false,
+        shouldPersist: false,
+      };
+    }
+
+    if (user.passwordResetOtpAttempts >= 5) {
+      user.passwordResetOtpHash = null;
+      user.passwordResetOtpExpiresAt = null;
+      user.passwordResetOtpAttempts = 0;
+      user.passwordResetOtpSentAt = null;
+      return {
+        valid: false,
+        shouldPersist: true,
+      };
+    }
+
+    const otpHash = this.hashToken(otp);
+    if (otpHash !== user.passwordResetOtpHash) {
+      user.passwordResetOtpAttempts += 1;
+      if (user.passwordResetOtpAttempts >= 5) {
+        user.passwordResetOtpHash = null;
+        user.passwordResetOtpExpiresAt = null;
+        user.passwordResetOtpSentAt = null;
+      }
+      return {
+        valid: false,
+        shouldPersist: true,
+      };
+    }
+
+    return {
+      valid: true,
+      shouldPersist: false,
+    };
   }
 
   private isDuplicateEmailError(error: unknown): boolean {
