@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
@@ -27,6 +27,8 @@ const PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly businessesService: BusinessesService,
@@ -212,19 +214,27 @@ export class AuthService {
   }
 
   async verifyResetOtp(dto: VerifyResetOtpDto): Promise<{ valid: boolean; message: string }> {
+    this.logger.log(`verify-reset-otp received for ${dto.email}`);
     const user = await this.usersService.findByEmail(dto.email);
+    this.logger.log(`verify-reset-otp user ${user ? 'found' : 'not found'} for ${dto.email}`);
     if (!user || !user.isActive) {
-      return { valid: false, message: 'Invalid or expired OTP' };
+      this.logger.warn(`verify-reset-otp invalid user state for ${dto.email}`);
+      throw new UnauthorizedException('Invalid or expired OTP');
     }
 
     const validation = this.validateResetOtp(user, dto.otp);
+    this.logger.log(
+      `verify-reset-otp result for ${dto.email}: expired=${!user.passwordResetOtpExpiresAt || user.passwordResetOtpExpiresAt.getTime() < Date.now()} matched=${validation.valid}`,
+    );
     if (!validation.valid) {
       if (validation.shouldPersist) {
         await this.usersService.save(user);
       }
-      return { valid: false, message: 'Invalid or expired OTP' };
+      this.logger.warn(`verify-reset-otp invalid or expired for ${dto.email}`);
+      throw new UnauthorizedException('Invalid or expired OTP');
     }
 
+    this.logger.log(`verify-reset-otp final response valid for ${dto.email}`);
     return { valid: true, message: 'OTP verified' };
   }
 
